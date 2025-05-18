@@ -138,9 +138,9 @@ end
     @test size(ldgs) == (d, k)
     @test ldgs ≈ projection(model) * Diagonal(sqrt.(principalvars(model)))
 
-    # Test diagnoise
-    @test length(diagnoise(model)) == d
-    @test all(diagnoise(model) .>= 0)  # Noise variances should be non-negative
+    # Test noisevars
+    @test length(noisevars(model)) == d
+    @test all(noisevars(model) .>= 0)  # Noise variances should be non-negative
 end
 
 @testset "Advanced functionality" begin

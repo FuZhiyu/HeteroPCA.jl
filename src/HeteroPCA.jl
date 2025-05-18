@@ -10,7 +10,7 @@ import StatsAPI: fit, predict, r2
 import LinearAlgebra: eigvals, eigvecs
 
 export HeteroPCAModel, fit, predict, reconstruct,
-    projection, principalvars, r2, loadings, diagnoise, var, eigvals, eigvecs,
+    projection, principalvars, r2, loadings, noisevars, var, eigvals, eigvecs,
     tprincipalvar, tresidualvar, heteropca, principalratio
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -27,7 +27,7 @@ they are mean‑centered and then imputed with zero internally (i.e. the
 
 `proj` gives an **orthonormal** basis of the estimated factor space,
 `prinvars` are the k largest singular values of the estimated low‑rank matrix,
-and `diagnoise` stores the final diagonal (noise) estimates.
+and `noisevars` stores the final diagonal (noise) estimates.
 """
 struct HeteroPCAModel{T<:Real}
     mean::Vector{T}      # d‑vector of variable means
@@ -35,7 +35,7 @@ struct HeteroPCAModel{T<:Real}
     prinvars::Vector{T}      # length‑k singular values (≈ variance explained)
     tprinvar::T              # sum(prinvars)
     tvar::T              # total variance in data
-    diagnoise::Vector{T}      # length‑d heteroscedastic noise variances
+    noisevars::Vector{T}      # length‑d heteroscedastic noise variances
     converged::Bool
     iterations::Int
 end
@@ -44,7 +44,7 @@ end
 
 r2(M::HeteroPCAModel) = M.tprinvar / M.tvar
 loadings(M::HeteroPCAModel) = sqrt.(principalvars(M))' .* projection(M)
-diagnoise(M::HeteroPCAModel) = M.diagnoise
+noisevars(M::HeteroPCAModel) = M.noisevars
 
 fullmean(d::Int, mv::AbstractVector{T}) where T = (isempty(mv) ? zeros(T, d) : mv)
 
@@ -131,15 +131,21 @@ const principalratio = r2
 # ────────────────────────────────────────────────────────────────────────────────
 
 """
-    fit(HeteroPCAModel, X; rank, maxiter=1_000, abstol=1e-6, α=1.0)
+    fit(HeteroPCAModel, X; rank=size(X, 1), kwargs...)
 
 Estimate a HeteroPCAModel model from a `d × n` matrix `X` that **may contain
-`missing`**.  Missing values are demeaned and replaced by zero before
-computing the sample cross‑product.
+`missing`**.  
 
-`rank` (a positive integer) is the target dimensionality *k*.
-`α` is the diagonal update relaxation parameter from Algorithm 2 of
-Cai et al. (2019); `α = 1` reproduces the original scheme.
+# Arguments
+- `X::AbstractMatrix{T}`: The input data matrix of dimension `d × n`
+- `rank::Int=size(X, 1)`: The target dimensionality *k* (number of components to extract)
+
+# Keyword arguments
+- `maxiter::Int=1_000`: Maximum number of iterations for the algorithm 
+- `abstol::Float64=1e-6`: Convergence tolerance for diagonal estimation
+- `demean::Bool=true`: Whether to center the data by subtracting column means; if the model is already demeaned, set `demean=false`
+- `impute_method::Symbol=:pairwise`: Method for handling missing values (:pairwise or :zero); `impute = :pairwise` compute the pairwise covariance matrix using available data only; `impute = :zero` fills the missing values with zeros after demeaning, and compute the covariance matrix adjusted for the sample missing rate. 
+- `alpha::Float64=1.0`: Diagonal update relaxation parameter; `alpha = 1` reproduces the original scheme;
 """
 function fit(::Type{HeteroPCAModel}, X::AbstractMatrix{T}, rank=size(X, 1);
     maxiter=1_000,
@@ -208,11 +214,11 @@ function fit(::Type{HeteroPCAModel}, X::AbstractMatrix{T}, rank=size(X, 1);
     proj = U
     prinvars = S
     tprinvar = sum(S)
-    diagnoise = diag(Σ) .- diag(M̃)
+    noisevars = diag(Σ) .- diag(M̃)
     # Total variance = common component + idiosyncratic noise
-    tvar = tprinvar + sum(diagnoise)
+    tvar = tprinvar + sum(noisevars)
 
-    return HeteroPCAModel(μ, proj, prinvars, tprinvar, tvar, diagnoise, converged, iter)
+    return HeteroPCAModel(μ, proj, prinvars, tprinvar, tvar, noisevars, converged, iter)
 end
 
 # Predict / reconstruct (parallel to pca.jl) ------------------------------------
@@ -309,9 +315,20 @@ function show(io::IO, ::MIME"text/plain", M::HeteroPCAModel)
 end
 
 """
-    heteropca(X; rank, maxiter=1_000, abstol=1e-6, mean=nothing, α=1.0)
+    heteropca(X, rank=size(X, 1); kwargs...)
 
-Convenience wrapper for `fit(HeteroPCAModel, X, ...)`.
+Convenience wrapper for `fit(HeteroPCAModel, X, rank=size(X, 1); kwargs...)`.
+
+# Arguments
+- `X::AbstractMatrix{T}`: The input data matrix of dimension `d × n`
+- `rank::Int=size(X, 1)`: The target dimensionality *k* (number of components to extract)
+
+# Keyword arguments
+- `maxiter::Int=1_000`: Maximum number of iterations for the algorithm 
+- `abstol::Float64=1e-6`: Convergence tolerance for diagonal estimation
+- `demean::Bool=true`: Whether to center the data by subtracting column means; if the model is already demeaned, set `demean=false`
+- `impute_method::Symbol=:pairwise`: Method for handling missing values (:pairwise or :zero); `impute = :pairwise` compute the pairwise covariance matrix using available data only; `impute = :zero` fills the missing values with zeros after demeaning, and compute the covariance matrix adjusted for the sample missing rate. 
+- `alpha::Float64=1.0`: Diagonal update relaxation parameter; `alpha = 1` reproduces the original scheme;
 """
 function heteropca(X::AbstractMatrix{T}, rank=size(X, 1);
     maxiter=1_000,
