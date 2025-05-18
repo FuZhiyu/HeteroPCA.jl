@@ -1,8 +1,9 @@
 # HeteroPCA.jl
 
+[![Build Status](https://github.com/fuzhiyu/HeteroPCA.jl/workflows/CI/badge.svg)](https://github.com/fuzhiyu/HeteroPCA.jl/actions)
+
 <!-- [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://fuzhiyu.github.io/HeteroPCA.jl/stable)
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://fuzhiyu.github.io/HeteroPCA.jl/dev) -->
-[![Build Status](https://github.com/fuzhiyu/HeteroPCA.jl/workflows/CI/badge.svg)](https://github.com/fuzhiyu/HeteroPCA.jl/actions)
 <!-- [![Coverage](https://codecov.io/gh/fuzhiyu/HeteroPCA.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/fuzhiyu/HeteroPCA.jl) -->
 
 ## Overview
@@ -113,7 +114,7 @@ There are two approaches to handle the missing values, controlled by `impute`. B
 
 Below is a replication of Figure 2 from Yan, Chen & Fan (2024), showing how HeteroPCA outperforms standard SVD-based methods for different sampling rates:
 
-![Replication of Figure 2](YanChenFan_figure2_replication.png)
+![Replication of Figure 2](simulations/YanChenFan_figure2_replication.png)
 
 To reproduce this figure, run the script `simulations/replicateYanChenFan2024.jl`.
 
