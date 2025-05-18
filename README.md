@@ -114,7 +114,7 @@ There are two approaches to handle the missing values, controlled by `impute`. B
 
 Below is a replication of Figure 2 from Yan, Chen & Fan (2024), showing how HeteroPCA outperforms standard SVD-based methods for different sampling rates:
 
-![Replication of Figure 2](simulations/YanChenFan_figure2_replication.png)
+![Replication of Figure 2](https://github.com/FuZhiyu/HeteroPCA.jl/blob/e79b44a0884ec60b407b532b5749d7a94542d377/simulations/YanChenFan_figure2_replication.png)
 
 To reproduce this figure, run the script `simulations/replicateYanChenFan2024.jl`.
 
