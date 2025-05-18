@@ -1,13 +1,13 @@
 # HeteroPCA.jl
 
-[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://fuzhiyu.github.io/HeteroPCA.jl/stable)
-[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://fuzhiyu.github.io/HeteroPCA.jl/dev)
+<!-- [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://fuzhiyu.github.io/HeteroPCA.jl/stable)
+[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://fuzhiyu.github.io/HeteroPCA.jl/dev) -->
 [![Build Status](https://github.com/fuzhiyu/HeteroPCA.jl/workflows/CI/badge.svg)](https://github.com/fuzhiyu/HeteroPCA.jl/actions)
-[![Coverage](https://codecov.io/gh/fuzhiyu/HeteroPCA.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/fuzhiyu/HeteroPCA.jl)
+<!-- [![Coverage](https://codecov.io/gh/fuzhiyu/HeteroPCA.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/fuzhiyu/HeteroPCA.jl) -->
 
 ## Overview
 
-HeteroPCA.jl implements the HeteroPCA algorithm proposed by Zhang, Cai, and Wu (2021). The API is similar to ![MultivariateStats.jl](https://github.com/JuliaStats/MultivariateStats.jl) with twists to handle missing values.  
+HeteroPCA.jl implements the HeteroPCA algorithm proposed by Zhang, Cai, and Wu (2021). The API is similar to [MultivariateStats.jl](https://github.com/JuliaStats/MultivariateStats.jl) with twists to handle missing values.  
 
 ## Installation
 
@@ -55,12 +55,12 @@ X_reconstructed = reconstruct(model, Y)
 cor(vec(X_reconstructed), vec(U_true * F_true)) # 0.96
 ```
 
-## Keyword Arguments for `heteropca()`
+## Keyword Arguments for `heteropca`
 
-The `heteropca()` function supports the following keyword arguments:
+The `heteropca` function supports the following keyword arguments:
 
 ```julia
-heteropca(X, rank; maxiter=1_000, abstol=1e-6, demean=true, impute_method=:pairwise, α=1.0)
+heteropca(X, rank = size(X, 1); maxiter=1_000, abstol=1e-6, demean=true, impute_method=:pairwise, α=1.0)
 ```
 
 - `maxiter::Int=1_000`: Maximum number of iterations for the algorithm
@@ -113,7 +113,7 @@ There are two approaches to handle the missing values, controlled by `impute`. B
 
 Below is a replication of Figure 2 from Yan, Chen & Fan (2024), showing how HeteroPCA outperforms standard SVD-based methods for different sampling rates:
 
-![Replication of Figure 2](simulations/figure2_replication.pdf)
+![Replication of Figure 2](YanChenFan_figure2_replication.png)
 
 To reproduce this figure, run the script `simulations/replicateYanChenFan2024.jl`.
 
