@@ -7,7 +7,7 @@
 #  ▸ Provides convenience routines to compute the error metrics used in Figs 1–3
 ##############################################################################
 
-using Random, LinearAlgebra, Statistics
+using Random, LinearAlgebra, Statistics, Distributions
 
 # ---------- utilities -------------------------------------------------------
 

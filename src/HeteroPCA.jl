@@ -217,14 +217,54 @@ end
 
 # Predict / reconstruct (parallel to pca.jl) ------------------------------------
 
-"""
-    predict(M::HeteroPCAModel, x)
+# --------------------------------------------------------------------------
+# Mask‑aware predictions (column‑wise GLS with missing values) -------------
+# --------------------------------------------------------------------------
 
-Project `x` (vector or matrix) onto the estimated factor space.
 """
-function predict(M::HeteroPCAModel, x::AbstractVecOrMat{T}) where {T}
-    z = coalesce.(x .- M.mean, 0.0)
-    return transpose(M.proj) * z
+    predict(M::HeteroPCAModel, x::AbstractVector; λ = 0.0)
+
+Project a **single observation vector** `x` onto the estimated factor space,
+handling missing entries by solving a weighted least‑squares problem on the
+observed coordinates only.
+
+`λ` adds a small ridge (Tikhonov) regularisation to keep the system well‑posed
+when fewer than `rank` coordinates are observed.
+"""
+function predict(M::HeteroPCAModel, x::AbstractVector{T}; λ::Real=0.0) where {T}
+    obs = map(!ismissing, x)
+    U = projection(M)
+    k = size(U, 2)
+
+    if count(obs) == 0
+        return fill(zero(T), k)               # no information at all
+    end
+
+    Uobs = @view U[obs, :]
+    μobs = @view M.mean[obs]
+    zobs = coalesce.(x[obs] - μobs, zero(T))
+
+    G = Uobs' * Uobs
+    if λ != 0.0
+        G .+= λ * I(k)
+    end
+    return G \ (Uobs' * zobs)
+end
+
+
+"""
+    predict(M::HeteroPCAModel, X::AbstractMatrix; λ = 0.0)
+
+Column‑wise version: returns a `k × n` matrix whose *j*‑th column is
+`predict(M, X[:, j]; λ = λ)`.
+"""
+function predict(M::HeteroPCAModel, X::AbstractMatrix{T}; λ::Real=0.0) where {T}
+    k, n = size(projection(M), 2), size(X, 2)
+    Z = Matrix{T}(undef, k, n)
+    @inbounds for j in 1:n
+        Z[:, j] = predict(M, @view(X[:, j]); λ=λ)
+    end
+    return Z
 end
 
 """
