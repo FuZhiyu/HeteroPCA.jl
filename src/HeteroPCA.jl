@@ -3,6 +3,7 @@ module HeteroPCA
 using LinearAlgebra, Statistics, Random, Missings
 import Base: size, show
 import StatsModels: fit
+using StatsBase
 using StatsBase: CoefTable
 import Statistics: mean, var
 import StatsAPI: fit, predict, r2
@@ -10,7 +11,7 @@ import LinearAlgebra: eigvals, eigvecs
 
 export HeteroPCAModel, fit, predict, reconstruct,
     projection, principalvars, r2, loadings, diagnoise, var, eigvals, eigvecs,
-    tprincipalvar, tresidualvar, heteropca
+    tprincipalvar, tresidualvar, heteropca, principalratio
 
 # ────────────────────────────────────────────────────────────────────────────────
 # A thin wrapper that mirrors the PCA struct defined in pca.jl
@@ -41,7 +42,6 @@ end
 
 # Short, PCA‑compatible helpers --------------------------------------------------
 
-principalvars(M::HeteroPCAModel) = M.prinvars
 r2(M::HeteroPCAModel) = M.tprinvar / M.tvar
 loadings(M::HeteroPCAModel) = sqrt.(principalvars(M))' .* projection(M)
 diagnoise(M::HeteroPCAModel) = M.diagnoise
@@ -123,66 +123,8 @@ var(M::HeteroPCAModel) = M.tvar
 Returns the ratio of variance preserved in the principal subspace, which is equal to `tprincipalvar(M) / var(M)`.
 """
 const principalratio = r2
-################################################################################
-# Mean‑centring helpers that tolerate `missing`
-################################################################################
-
-"""
-    centralize(X, mean)
-
-Return a *numeric* copy of `X` (vector or `d×n` matrix) in which each row is
-mean‑centred.  After centring, any `missing` entry is replaced by **0.0**,
-recreating the same convention used when HeteroPCAModel was fitted.
-
-The original `X` is left untouched; the result is `Float64`.
-"""
-function centralize(X::AbstractVector, mean::AbstractVector)
-    isempty(mean) && return replace!(copy(X), missing => 0.0)
-
-    # Vectorized operation with broadcasting
-    return coalesce.(X .- mean, 0.0)
-end
-
-function centralize(X::AbstractMatrix, mean::AbstractVector)
-    isempty(mean) && return replace!(copy(X), missing => 0.0)
-
-    # Vectorized operation with broadcasting
-    # Reshape mean as column vector for row-wise broadcasting
-    return coalesce.(X .- mean, 0.0)
-end
-
-"""
-    decentralize(Z, mean)
-
-Add back the row means stored in `mean` to the **centred** numeric data `Z`.
-"""
-decentralize(Z::AbstractVecOrMat{T}, mean::AbstractVector) where {T<:Real} =
-    isempty(mean) ? Z : Z .+ mean
 
 
-"""
-    demean(X)
-
-Convenience wrapper that returns **both** the centred/imputed matrix and the
-per‑row means:
-
-```julia
-Z, μ = demean(X)
-```
-"""
-function demean(X::AbstractMatrix, m::Nothing)
-    d, _ = size(X)
-    μ = [mean(skipmissing(view(X, i, :))) for i in 1:d]
-    return centralize(X, μ), μ
-end
-
-function demean(X::AbstractMatrix, m::AbstractVector)
-    return centralize(X, m), m
-end
-
-function demean(X::AbstractMatrix, m::Real)
-    return centralize(X, fill(m, size(X, 1))), m
-end
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Core algorithm (Cai, Ma & Wu 2019; Xue & Zou 2023)
@@ -199,17 +141,40 @@ computing the sample cross‑product.
 `α` is the diagonal update relaxation parameter from Algorithm 2 of
 Cai et al. (2019); `α = 1` reproduces the original scheme.
 """
-function fit(::Type{HeteroPCAModel}, X::AbstractMatrix{T};
-    rank::Integer,
-    maxiter::Integer=1_000,
-    abstol::Real=1e-6,
-    mean=nothing,
-    α::Real=1.0) where T<:Real
+function fit(::Type{HeteroPCAModel}, X::AbstractMatrix{T}, rank=size(X, 1);
+    maxiter=1_000,
+    abstol=1e-6,
+    demean=true,
+    impute_method=:pairwise,
+    α=1.0) where T
 
     d, n = size(X)
-    Z, μ = demean(X, mean)
+    if demean
+        μ = [mean(skipmissing(view(X, i, :))) for i in 1:d]
+        Z = X .- μ
+    else
+        Z = X
+        μ = fill(zero(eltype(X)), d)
+    end
 
-    Σ = (Z * Z') / (n - 1)             # sample cross‑product
+    if impute_method == :pairwise
+        mimask = .!ismissing.(Z)
+        Zfilled = coalesce.(Z, zero(eltype(Z)))
+        Σ = (Zfilled * Zfilled') ./ (mimask * mimask' .- 1)
+        # Σ = pairwise(cov, eachrow(Z), skipmissing=:pairwise)
+    elseif impute_method == :zero
+        p = mean(!ismissing, Z)
+        Zfilled = coalesce.(Z, zero(eltype(Z)))
+        Σ = Zfilled * Zfilled' ./ (n - 1) ./ p^2
+        for i in 1:d # diagonal is only off by p
+            Σ[i, i] *= p
+        end
+    else
+        @error "impute_method must be :pairwise or :zero. :pairwise is used."
+        Σ = pairwise(cov, eachrow(Z), skipmissing=:pairwise)
+    end
+
+    # Σ = (Z * Z') / (n - 1)             # sample cross‑product
     M = Σ - Diagonal(diag(Σ))        # off‑diag part
     U = Matrix{T}(undef, d, rank)                # preallocation
     S = Vector{T}(undef, rank)
@@ -217,11 +182,16 @@ function fit(::Type{HeteroPCAModel}, X::AbstractMatrix{T};
     iter = 0
     converged = false
     while iter < maxiter
+        # if iter % 100 == 0
+        #     @info "Iteration $iter"
+        # end
         F = svd(M; full=false)           # Truncated SVD (rank ≥ k)
         U = F.U[:, 1:rank]
         S = F.S[1:rank]
         M̃ = U * Diagonal(S) * U'        # best rank‑k approx (sym)
-        err = maximum(abs.((diag(M̃) .- diag(M)) ./ diag(M)))
+        # err = maximum(abs.((diag(M̃) .- diag(M)) ./ diag(M)))
+        err = maximum(abs.((diag(M̃) .- diag(M))))
+        # println(err)
         if err < abstol
             converged = true
             break
@@ -252,8 +222,8 @@ end
 
 Project `x` (vector or matrix) onto the estimated factor space.
 """
-function predict(M::HeteroPCAModel, x::AbstractVecOrMat{T}) where {T<:Real}
-    z = centralize(x, M.mean)
+function predict(M::HeteroPCAModel, x::AbstractVecOrMat{T}) where {T}
+    z = coalesce.(x .- M.mean, 0.0)
     return transpose(M.proj) * z
 end
 
@@ -262,8 +232,8 @@ end
 
 Inverse transform from factor space back to the original *d*‑space.
 """
-function reconstruct(M::HeteroPCAModel, y::AbstractVecOrMat{T}) where {T<:Real}
-    return decentralize(M.proj * y, M.mean)
+function reconstruct(M::HeteroPCAModel, y::AbstractVecOrMat{T}) where {T}
+    return M.proj * y .+ M.mean
 end
 
 
@@ -303,18 +273,18 @@ end
 
 Convenience wrapper for `fit(HeteroPCAModel, X, ...)`.
 """
-function heteropca(X::AbstractMatrix{T};
-    rank::Integer,
-    maxiter::Integer=1_000,
-    abstol::Real=1e-6,
-    mean=nothing,
-    α::Real=1.0) where T<:Real
+function heteropca(X::AbstractMatrix{T}, rank=size(X, 1);
+    maxiter=1_000,
+    abstol=1e-6,
+    demean=true,
+    impute_method=:pairwise,
+    α=1.0) where T
 
-    return fit(HeteroPCAModel, X;
-        rank=rank,
+    return fit(HeteroPCAModel, X, rank;
         maxiter=maxiter,
         abstol=abstol,
-        mean=mean,
+        demean=demean,
+        impute_method=impute_method,
         α=α)
 end
 
