@@ -1,8 +1,7 @@
 module HeteroPCA
 
-using LinearAlgebra, Statistics, Random, Missings
+using LinearAlgebra, Statistics, Random
 import Base: size, show
-import StatsModels: fit
 using StatsBase
 using StatsBase: CoefTable
 import Statistics: mean, var
