@@ -184,8 +184,8 @@ function fit(::Type{HeteroPCAModel}, X::AbstractMatrix{T}, rank=size(X, 1);
 
     # Σ = (Z * Z') / (n - 1)             # sample cross‑product
     M = Σ - Diagonal(diag(Σ))        # off‑diag part
-    U = Matrix{T}(undef, d, rank)                # preallocation
-    S = Vector{T}(undef, rank)
+    U = Matrix{eltype(M)}(undef, d, rank)                # preallocation
+    S = Vector{eltype(M)}(undef, rank)
     M̃ = similar(M)                     # pre-define M̃ outside the loop
     iter = 0
     converged = false
@@ -195,12 +195,12 @@ function fit(::Type{HeteroPCAModel}, X::AbstractMatrix{T}, rank=size(X, 1);
         # end
         if use_tsvd
             F = tsvd(M, rank; tolreorth=0.0)  # Use TSVD for faster truncated SVD
-            U = F[1]                     # U matrix
-            S = F[2]                     # singular values vector
+            U .= F[1]                    # Copy U matrix to ensure same type
+            S .= F[2]                    # Copy singular values vector to ensure same type
         else
             F = svd(M; full=false)       # Standard truncated SVD (rank ≥ k)
-            U = F.U[:, 1:rank]
-            S = F.S[1:rank]
+            U .= F.U[:, 1:rank]          # Copy to ensure same type
+            S .= F.S[1:rank]             # Copy to ensure same type
         end
         M̃ = U * Diagonal(S) * U'        # best rank‑k approx (sym)
         # err = maximum(abs.((diag(M̃) .- diag(M)) ./ diag(M)))
