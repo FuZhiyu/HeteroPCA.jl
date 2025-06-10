@@ -7,6 +7,7 @@ using StatsBase: CoefTable
 import Statistics: mean, var
 import StatsAPI: fit, predict, r2
 import LinearAlgebra: eigvals, eigvecs
+using TSVD
 
 export HeteroPCAModel, fit, predict, reconstruct,
     projection, principalvars, r2, loadings, noisevars, var, eigvals, eigvecs,
@@ -145,13 +146,15 @@ Estimate a HeteroPCAModel model from a `d × n` matrix `X` that **may contain
 - `demean::Bool=true`: Whether to center the data by subtracting column means; if the model is already demeaned, set `demean=false`
 - `impute_method::Symbol=:pairwise`: Method for handling missing values (:pairwise or :zero); `impute = :pairwise` compute the pairwise covariance matrix using available data only; `impute = :zero` fills the missing values with zeros after demeaning, and compute the covariance matrix adjusted for the sample missing rate. 
 - `alpha::Float64=1.0`: Diagonal update relaxation parameter; `alpha = 1` reproduces the original scheme;
+- `use_tsvd::Bool=false`: Whether to use TSVD.jl for faster truncated SVD decomposition; recommended for large matrices
 """
 function fit(::Type{HeteroPCAModel}, X::AbstractMatrix{T}, rank=size(X, 1);
     maxiter=1_000,
     abstol=1e-6,
     demean=true,
     impute_method=:pairwise,
-    α=1.0) where T
+    α=1.0,
+    use_tsvd=false) where T
 
     d, n = size(X)
     if demean
@@ -190,9 +193,15 @@ function fit(::Type{HeteroPCAModel}, X::AbstractMatrix{T}, rank=size(X, 1);
         # if iter % 100 == 0
         #     @info "Iteration $iter"
         # end
-        F = svd(M; full=false)           # Truncated SVD (rank ≥ k)
-        U = F.U[:, 1:rank]
-        S = F.S[1:rank]
+        if use_tsvd
+            F = tsvd(M, rank; tolreorth=0.0)  # Use TSVD for faster truncated SVD
+            U = F[1]                     # U matrix
+            S = F[2]                     # singular values vector
+        else
+            F = svd(M; full=false)       # Standard truncated SVD (rank ≥ k)
+            U = F.U[:, 1:rank]
+            S = F.S[1:rank]
+        end
         M̃ = U * Diagonal(S) * U'        # best rank‑k approx (sym)
         # err = maximum(abs.((diag(M̃) .- diag(M)) ./ diag(M)))
         err = maximum(abs.((diag(M̃) .- diag(M))))
@@ -328,20 +337,23 @@ Convenience wrapper for `fit(HeteroPCAModel, X, rank=size(X, 1); kwargs...)`.
 - `demean::Bool=true`: Whether to center the data by subtracting column means; if the model is already demeaned, set `demean=false`
 - `impute_method::Symbol=:pairwise`: Method for handling missing values (:pairwise or :zero); `impute = :pairwise` compute the pairwise covariance matrix using available data only; `impute = :zero` fills the missing values with zeros after demeaning, and compute the covariance matrix adjusted for the sample missing rate. 
 - `alpha::Float64=1.0`: Diagonal update relaxation parameter; `alpha = 1` reproduces the original scheme;
+- `use_tsvd::Bool=false`: Whether to use TSVD.jl for faster truncated SVD decomposition; recommended for large matrices
 """
 function heteropca(X::AbstractMatrix{T}, rank=size(X, 1);
     maxiter=1_000,
     abstol=1e-6,
     demean=true,
     impute_method=:pairwise,
-    α=1.0) where T
+    α=1.0,
+    use_tsvd=false) where T
 
     return fit(HeteroPCAModel, X, rank;
         maxiter=maxiter,
         abstol=abstol,
         demean=demean,
         impute_method=impute_method,
-        α=α)
+        α=α,
+        use_tsvd=use_tsvd)
 end
 
 end # module

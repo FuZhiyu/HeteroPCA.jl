@@ -94,7 +94,7 @@ end
     fac_err = 0.0
     for _ in 1:R
         Y, Ustar, Z = simulate(d, n_large, r; p=1.0, ω̄=0.02)
-        m = heteropca(Y, r; demean=false, impute_method=:zero)
+        m = heteropca(Y, r; demean=false, impute_method=:zero, use_tsvd=true)
         sub_err += subspace_error(projection(m), Ustar)
         fac_err += factor_error(predict(m, Y), Z)
     end
@@ -118,7 +118,7 @@ end
     for _ in 1:R
         Y, Ustar, Z = simulate(d, Int(n_large / p), r; p=p, ω̄=0.02)
 
-        m0 = heteropca(Y, r; demean=true, impute_method=:zero)
+        m0 = heteropca(Y, r; demean=true, impute_method=:zero, use_tsvd=true)
         sub_zero += subspace_error(projection(m0), Ustar)
         fac_zero += factor_error(predict(m0, Y), Z)
 
