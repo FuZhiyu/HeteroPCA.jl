@@ -140,18 +140,28 @@ Estimate a HeteroPCAModel model from a `d × n` matrix `X` that **may contain
 - `rank::Int=size(X, 1)`: The target dimensionality *k* (number of components to extract)
 
 # Keyword arguments
+- `algorithm::Symbol=:standard`: Algorithm to use (:standard or :deflated)
 - `maxiter::Int=1_000`: Maximum number of iterations for the algorithm 
 - `abstol::Float64=1e-6`: Convergence tolerance for diagonal estimation
 - `demean::Bool=true`: Whether to center the data by subtracting column means; if the model is already demeaned, set `demean=false`
 - `impute_method::Symbol=:pairwise`: Method for handling missing values (:pairwise or :zero); `impute = :pairwise` compute the pairwise covariance matrix using available data only; `impute = :zero` fills the missing values with zeros after demeaning, and compute the covariance matrix adjusted for the sample missing rate. 
 - `alpha::Float64=1.0`: Diagonal update relaxation parameter; `alpha = 1` reproduces the original scheme;
+
+# Deflated algorithm specific parameters
+- `t_block::Int=10`: Iterations per deflation block (deflated algorithm only)
+- `condition_number_threshold::Float64=4.0`: Well-conditioning threshold (deflated algorithm only)
+- `gap_threshold_factor::Float64=1.0`: Spectral gap factor (deflated algorithm only)
 """
 function fit(::Type{HeteroPCAModel}, X::AbstractMatrix{T}, rank=size(X, 1);
+    algorithm::Symbol=:standard,
     maxiter=1_000,
     abstol=1e-6,
     demean=true,
     impute_method=:pairwise,
-    α=1.0) where T
+    α=1.0,
+    t_block::Int=10,
+    condition_number_threshold::Real=4.0,
+    gap_threshold_factor::Real=1.0) where T
 
     d, n = size(X)
     if demean
@@ -179,41 +189,64 @@ function fit(::Type{HeteroPCAModel}, X::AbstractMatrix{T}, rank=size(X, 1);
         Σ = pairwise(cov, eachrow(Z), skipmissing=:pairwise)
     end
 
-    # Σ = (Z * Z') / (n - 1)             # sample cross‑product
-    M = Σ - Diagonal(diag(Σ))        # off‑diag part
-    U = Matrix{T}(undef, d, rank)                # preallocation
-    S = Vector{T}(undef, rank)
-    M̃ = similar(M)                     # pre-define M̃ outside the loop
-    iter = 0
-    converged = false
-    while iter < maxiter
-        # if iter % 100 == 0
-        #     @info "Iteration $iter"
-        # end
-        F = svd(M; full=false)           # Truncated SVD (rank ≥ k)
-        U = F.U[:, 1:rank]
+    # Dispatch to appropriate algorithm
+    if algorithm == :standard
+        # Standard HeteroPCA algorithm
+        M = Σ - Diagonal(diag(Σ))        # off‑diag part
+        U = Matrix{T}(undef, d, rank)                # preallocation
+        S = Vector{T}(undef, rank)
+        M̃ = similar(M)                     # pre-define M̃ outside the loop
+        iter = 0
+        converged = false
+        while iter < maxiter
+            F = svd(M; full=false)           # Truncated SVD (rank ≥ k)
+            U = F.U[:, 1:rank]
+            S = F.S[1:rank]
+            M̃ = U * Diagonal(S) * U'        # best rank‑k approx (sym)
+            err = maximum(abs.((diag(M̃) .- diag(M))))
+            if err < abstol
+                converged = true
+                break
+            end
+
+            # Robbins–Monro diagonal update
+            @inbounds for i in 1:d
+                M[i, i] = α * M̃[i, i] + (1 - α) * M[i, i]
+            end
+            iter += 1
+        end
+        iter == maxiter && @warn "HeteroPCAModel: not converged after $maxiter iterations"
+
+        proj = U
+        prinvars = S
+        tprinvar = sum(S) 
+        noisevars = diag(Σ) .- diag(M̃)
+        
+    elseif algorithm == :deflated
+        # Deflated HeteroPCA algorithm
+        # Work directly with the covariance matrix Σ instead of raw data
+        U = deflated_heteropca_core(Σ, rank; 
+                                  t_block=t_block, 
+                                  condition_number_threshold=condition_number_threshold, 
+                                  gap_threshold_factor=gap_threshold_factor)
+        
+        # Compute the reconstructed low-rank matrix
+        M̃ = U * U'
+        
+        # Extract singular values from the reconstructed matrix  
+        F = svd(M̃; full=false)
         S = F.S[1:rank]
-        M̃ = U * Diagonal(S) * U'        # best rank‑k approx (sym)
-        # err = maximum(abs.((diag(M̃) .- diag(M)) ./ diag(M)))
-        err = maximum(abs.((diag(M̃) .- diag(M))))
-        # println(err)
-        if err < abstol
-            converged = true
-            break
-        end
-
-        # Robbins–Monro diagonal update
-        @inbounds for i in 1:d
-            M[i, i] = α * M̃[i, i] + (1 - α) * M[i, i]
-        end
-        iter += 1
+        
+        proj = U
+        prinvars = S
+        tprinvar = sum(S)
+        noisevars = diag(Σ) .- diag(M̃)
+        converged = true  # Deflated algorithm always "converges"
+        iter = t_block  # Report the block iterations used
+        
+    else
+        throw(ArgumentError("algorithm must be :standard or :deflated, got :$algorithm"))
     end
-    iter == maxiter && @warn "HeteroPCAModel: not converged after $maxiter iterations"
-
-    proj = U
-    prinvars = S
-    tprinvar = sum(S)
-    noisevars = diag(Σ) .- diag(M̃)
     # Total variance = common component + idiosyncratic noise
     tvar = tprinvar + sum(noisevars)
 
@@ -323,25 +356,144 @@ Convenience wrapper for `fit(HeteroPCAModel, X, rank=size(X, 1); kwargs...)`.
 - `rank::Int=size(X, 1)`: The target dimensionality *k* (number of components to extract)
 
 # Keyword arguments
+- `algorithm::Symbol=:standard`: Algorithm to use (:standard or :deflated)
 - `maxiter::Int=1_000`: Maximum number of iterations for the algorithm 
 - `abstol::Float64=1e-6`: Convergence tolerance for diagonal estimation
 - `demean::Bool=true`: Whether to center the data by subtracting column means; if the model is already demeaned, set `demean=false`
 - `impute_method::Symbol=:pairwise`: Method for handling missing values (:pairwise or :zero); `impute = :pairwise` compute the pairwise covariance matrix using available data only; `impute = :zero` fills the missing values with zeros after demeaning, and compute the covariance matrix adjusted for the sample missing rate. 
 - `alpha::Float64=1.0`: Diagonal update relaxation parameter; `alpha = 1` reproduces the original scheme;
+
+# Deflated algorithm specific parameters
+- `t_block::Int=10`: Iterations per deflation block (deflated algorithm only)
+- `condition_number_threshold::Float64=4.0`: Well-conditioning threshold (deflated algorithm only)
+- `gap_threshold_factor::Float64=1.0`: Spectral gap factor (deflated algorithm only)
 """
 function heteropca(X::AbstractMatrix{T}, rank=size(X, 1);
+    algorithm::Symbol=:standard,
     maxiter=1_000,
     abstol=1e-6,
     demean=true,
     impute_method=:pairwise,
-    α=1.0) where T
+    α=1.0,
+    t_block::Int=10,
+    condition_number_threshold::Real=4.0,
+    gap_threshold_factor::Real=1.0) where T
 
     return fit(HeteroPCAModel, X, rank;
+        algorithm=algorithm,
         maxiter=maxiter,
         abstol=abstol,
         demean=demean,
         impute_method=impute_method,
-        α=α)
+        α=α,
+        t_block=t_block,
+        condition_number_threshold=condition_number_threshold,
+        gap_threshold_factor=gap_threshold_factor)
+end
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Deflated HeteroPCA algorithm (helper functions)
+# ────────────────────────────────────────────────────────────────────────────────
+
+"""
+    Pdiag(A)
+
+Keep only diagonal of square matrix `A`, zero elsewhere.
+"""
+function Pdiag(A::AbstractMatrix{T}) where T
+    return Diagonal(diag(A))
+end
+
+"""
+    Poff(A)
+
+Zero the diagonal of `A`, keep the rest.
+"""
+function Poff(A::AbstractMatrix{T}) where T
+    return A - Pdiag(A)
+end
+
+"""
+    eigsr(A, r)
+
+Return the column-orthonormal matrix (n×r) of top-r eigenvectors of symmetric `A`.
+"""
+function eigsr(A::AbstractMatrix{T}, r::Int) where T
+    F = eigen(Symmetric(A))
+    idx = sortperm(F.values, rev=true)
+    return F.vectors[:, idx[1:r]]
+end
+
+"""
+    heteropca_inner(G_in, r, t_max)
+
+Inner routine for deflated HeteroPCA: iteratively impute better diagonal 
+while keeping off-diagonal fixed.
+"""
+function heteropca_inner(G_in::AbstractMatrix{T}, r::Int, t_max::Int) where T
+    G = copy(G_in)
+    for _ in 1:t_max
+        U = eigsr(G, r)
+        G = Poff(G_in) + Pdiag(U * U')
+    end
+    return eigsr(G, r)
+end
+
+"""
+    deflated_heteropca_core(Σ, r; t_block=10, condition_number_threshold=4.0, gap_threshold_factor=1.0)
+
+Core deflated HeteroPCA algorithm that implements the deflation strategy with adaptive block sizing.
+Takes the covariance matrix Σ as input.
+"""
+function deflated_heteropca_core(Σ::AbstractMatrix{T}, r::Int; 
+    t_block::Int=10, 
+    condition_number_threshold::Real=4.0, 
+    gap_threshold_factor::Real=1.0) where T
+    
+    d = size(Σ, 1)
+    G0 = Poff(Σ)  # Pre-compute covariance matrix with diagonal deleted
+    
+    k = 0
+    r_prev = 0
+    G_prev = G0
+    U_final = Matrix{T}(undef, d, r)
+    
+    while r_prev < r
+        k += 1
+        
+        # Compute singular values for adaptive block sizing
+        s = svd(G_prev, full=false).S
+        
+        # Choose block size r_k
+        R_k = Int[]
+        for rp in (r_prev+1):r
+            # Check well-conditioning: σ_{r_prev+1}/σ_{r'} ≤ condition_number_threshold
+            if rp <= length(s) && s[r_prev+1] / s[rp] <= condition_number_threshold
+                # Check spectral gap: σ_{r'} - σ_{r'+1} ≥ σ_{r'}/r * gap_threshold_factor
+                if rp == r || (rp+1 <= length(s) && s[rp] - s[rp+1] >= s[rp]/r * gap_threshold_factor)
+                    push!(R_k, rp)
+                end
+            end
+        end
+        
+        r_k = isempty(R_k) ? r : maximum(R_k)
+        
+        # Run HeteroPCA on current block
+        U_k = heteropca_inner(G_prev, r_k, t_block)
+        
+        # Store the result
+        if r_k == r
+            U_final = U_k
+        else
+            U_final[:, 1:r_k] = U_k
+        end
+        
+        # Update Gram matrix with new diagonal
+        G_prev = Poff(G0) + Pdiag(U_k * U_k')
+        r_prev = r_k
+    end
+    
+    return U_final
 end
 
 end # module
