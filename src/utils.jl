@@ -1,8 +1,8 @@
-"Return A rotated to minimize Frobenius distance to B."
+"Return A rotated in columns to minimize Frobenius distance to B."
 function align_A_to_B(A, B)
-    U, S, V = svd(B * A')
+    U, S, V = svd(A' * B)
     R = U * V'
-    return R * A
+    return A * R
 end
 
 "Frobenius error between predicted and true factors after optimal rotation."
