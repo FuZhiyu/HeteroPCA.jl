@@ -39,21 +39,6 @@ function simulate(d, n, r; p=1.0, ω̄=0.0)
     end
 end
 
-"Sign‑flip alignment matrix that minimises ‖UR − V‖_F."
-sgn_alignment(U, V) =
-    let S = svd(U' * V)
-        S.U * S.Vt
-    end
-
-"Spectral mis‑alignment with optimal sign flips."
-subspace_error(Û, Ustar) = opnorm(Û * sgn_alignment(Û, Ustar) - Ustar)
-
-"Frobenius error between predicted and true factors after optimal rotation."
-function factor_error(F̂, Z)
-    U, S, V = svd(F̂ * Z')
-    R = U * V'
-    return norm(F̂ - R * Z) / norm(Z)
-end
 
 # --------------------------------------------------------------------------
 # global dims used in all tests
@@ -69,11 +54,11 @@ r = 3
     Y, Ustar, Z = simulate(d, n, r; p=1.0, ω̄=0.0)
     model = heteropca(Y, r; demean=false, abstol=1e-10)
 
-    @test subspace_error(projection(model), Ustar) ≤ 1e-8
+    @test frobenius_error(projection(model), Ustar) ≤ 1e-8
 
     # test factor recovery
     F̂ = predict(model, Y)
-    @test factor_error(F̂, Z) ≤ 1e-8
+    @test frobenius_error(F̂, Z) ≤ 1e-8
 
     # round‑trip a few columns through predict / reconstruct
     for j in 1:5
@@ -95,8 +80,8 @@ end
     for _ in 1:R
         Y, Ustar, Z = simulate(d, n_large, r; p=1.0, ω̄=0.02)
         m = heteropca(Y, r; demean=false, impute_method=:zero)
-        sub_err += subspace_error(projection(m), Ustar)
-        fac_err += factor_error(predict(m, Y), Z)
+        sub_err += frobenius_error(projection(m), Ustar)
+        fac_err += frobenius_error(predict(m, Y), Z)
     end
     sub_err /= R
     fac_err /= R
@@ -119,12 +104,12 @@ end
         Y, Ustar, Z = simulate(d, Int(n_large / p), r; p=p, ω̄=0.02)
 
         m0 = heteropca(Y, r; demean=true, impute_method=:zero)
-        sub_zero += subspace_error(projection(m0), Ustar)
-        fac_zero += factor_error(predict(m0, Y), Z)
+        sub_zero += frobenius_error(projection(m0), Ustar)
+        fac_zero += frobenius_error(predict(m0, Y), Z)
 
         mp = heteropca(Y, r; demean=true, impute_method=:pairwise)
-        sub_pair += subspace_error(projection(mp), Ustar)
-        fac_pair += factor_error(predict(mp, Y), Z)
+        sub_pair += frobenius_error(projection(mp), Ustar)
+        fac_pair += frobenius_error(predict(mp, Y), Z)
     end
     sub_zero /= R
     fac_zero /= R
@@ -149,12 +134,12 @@ end
         Y, Ustar, Z = simulate(d, Int(n_large / p), r; p=p, ω̄=0.02)
 
         m0 = heteropca(Y, r; demean=true, impute_method=:zero, algorithm=DeflatedHeteroPCA())
-        sub_zero += subspace_error(projection(m0), Ustar)
-        fac_zero += factor_error(predict(m0, Y), Z)
+        sub_zero += frobenius_error(projection(m0), Ustar)
+        fac_zero += frobenius_error(predict(m0, Y), Z)
 
         mp = heteropca(Y, r; demean=true, impute_method=:pairwise, algorithm=DeflatedHeteroPCA())
-        sub_pair += subspace_error(projection(mp), Ustar)
-        fac_pair += factor_error(predict(mp, Y), Z)
+        sub_pair += frobenius_error(projection(mp), Ustar)
+        fac_pair += frobenius_error(predict(mp, Y), Z)
     end
     sub_zero /= R
     fac_zero /= R

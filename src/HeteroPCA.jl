@@ -8,12 +8,14 @@ import Statistics: mean, var
 import StatsAPI: fit, predict, r2
 import LinearAlgebra: eigvals, eigvecs
 
+include("utils.jl")
 include("heteropcamodel.jl")
 include("algorithms.jl")
 
 export HeteroPCAModel, fit, predict, reconstruct,
     projection, principalvars, r2, loadings, noisevars, var, eigvals, eigvecs,
     tprincipalvar, tresidualvar, heteropca, principalratio,
-    StandardHeteroPCA, DeflatedHeteroPCA, DiagonalDeletion
+    StandardHeteroPCA, DeflatedHeteroPCA, DiagonalDeletion,
+    align_A_to_B, frobenius_error
 
 end # module
