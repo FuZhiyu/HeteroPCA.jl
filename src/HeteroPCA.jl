@@ -10,7 +10,8 @@ import LinearAlgebra: eigvals, eigvecs
 
 export HeteroPCAModel, fit, predict, reconstruct,
     projection, principalvars, r2, loadings, noisevars, var, eigvals, eigvecs,
-    tprincipalvar, tresidualvar, heteropca, principalratio
+    tprincipalvar, tresidualvar, heteropca, principalratio,
+    StandardHeteroPCA, DeflatedHeteroPCA, DiagonalDeletion
 
 # ────────────────────────────────────────────────────────────────────────────────
 # A thin wrapper that mirrors the PCA struct defined in pca.jl
@@ -129,10 +130,34 @@ const principalratio = r2
 # Algorithm dispatch types
 # ────────────────────────────────────────────────────────────────────────────────
 
+"""
+    HeteroPCAAlgorithm
+
+Abstract type for HeteroPCA algorithm implementations.
+"""
 abstract type HeteroPCAAlgorithm end
 
+"""
+    StandardHeteroPCA <: HeteroPCAAlgorithm
+
+Standard iterative HeteroPCA algorithm using SVD and Robbins-Monro updates.
+This is the original algorithm from Cai, Ma & Wu (2019).
+"""
 struct StandardHeteroPCA <: HeteroPCAAlgorithm end
 
+"""
+    DeflatedHeteroPCA <: HeteroPCAAlgorithm
+
+Deflated HeteroPCA algorithm with adaptive block sizing for improved convergence.
+Implements the deflation strategy with two main parameters:
+
+# Fields
+- `t_block::Int`: Number of iterations per deflation block (default: 10)
+- `condition_number_threshold::Float64`: Threshold for determining well-conditioned blocks (default: 4.0)
+
+# Constructor
+    DeflatedHeteroPCA(; t_block::Int=10, condition_number_threshold::Real=4.0)
+"""
 struct DeflatedHeteroPCA <: HeteroPCAAlgorithm
     t_block::Int
     condition_number_threshold::Float64
@@ -141,6 +166,13 @@ struct DeflatedHeteroPCA <: HeteroPCAAlgorithm
         new(t_block, condition_number_threshold)
 end
 
+"""
+    DiagonalDeletion <: HeteroPCAAlgorithm
+
+Diagonal-deletion PCA algorithm that performs a single SVD step on the 
+off-diagonal covariance matrix without iteration. This provides a baseline
+comparison method.
+"""
 struct DiagonalDeletion <: HeteroPCAAlgorithm end
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -158,17 +190,14 @@ Estimate a HeteroPCAModel model from a `d × n` matrix `X` that **may contain
 - `rank::Int=size(X, 1)`: The target dimensionality *k* (number of components to extract)
 
 # Keyword arguments
-- `algorithm::Symbol=:standard`: Algorithm to use (:standard, :deflated, or :diagonal_deletion)
+- `algorithm::HeteroPCAAlgorithm=StandardHeteroPCA()`: Algorithm to use (StandardHeteroPCA(), DeflatedHeteroPCA(), or DiagonalDeletion())
 - `maxiter::Int=1_000`: Maximum number of iterations for the algorithm 
 - `abstol::Float64=1e-6`: Convergence tolerance for diagonal estimation
 - `demean::Bool=true`: Whether to center the data by subtracting column means; if the model is already demeaned, set `demean=false`
 - `impute_method::Symbol=:pairwise`: Method for handling missing values (:pairwise or :zero); `impute = :pairwise` compute the pairwise covariance matrix using available data only; `impute = :zero` fills the missing values with zeros after demeaning, and compute the covariance matrix adjusted for the sample missing rate. 
-- `alpha::Float64=1.0`: Diagonal update relaxation parameter; `alpha = 1` reproduces the original scheme;
+- `α::Float64=1.0`: Diagonal update relaxation parameter; `α = 1` reproduces the original scheme;
 - `suppress_warnings::Bool=false`: Whether to suppress convergence warnings
 
-# Deflated algorithm specific parameters
-- `t_block::Int=10`: Iterations per deflation block (deflated algorithm only)
-- `condition_number_threshold::Float64=4.0`: Well-conditioning threshold (deflated algorithm only)
 """
 
 """
@@ -287,15 +316,13 @@ function _fit_impl(alg::DiagonalDeletion, Σ::AbstractMatrix{T}, μ::AbstractVec
 end
 
 function fit(::Type{HeteroPCAModel}, X::AbstractMatrix{T}, rank=size(X, 1);
-    algorithm::Symbol=:standard,
+    algorithm::HeteroPCAAlgorithm=StandardHeteroPCA(),
     maxiter=1_000,
     abstol=1e-6,
     demean=true,
     impute_method=:pairwise,
     α=1.0,
-    suppress_warnings=false,
-    t_block::Int=10,
-    condition_number_threshold::Real=4.0) where T
+    suppress_warnings=false) where T
 
     d, n = size(X)
     
@@ -324,19 +351,7 @@ function fit(::Type{HeteroPCAModel}, X::AbstractMatrix{T}, rank=size(X, 1);
         Σ = pairwise(cov, eachrow(Z), skipmissing=:pairwise)
     end
 
-    # Dispatch to appropriate algorithm
-    if algorithm == :standard
-        alg = StandardHeteroPCA()
-    elseif algorithm == :deflated
-        alg = DeflatedHeteroPCA(t_block=t_block, 
-                               condition_number_threshold=condition_number_threshold)
-    elseif algorithm == :diagonal_deletion
-        alg = DiagonalDeletion()
-    else
-        throw(ArgumentError("algorithm must be :standard, :deflated, or :diagonal_deletion, got :$algorithm"))
-    end
-    
-    return _fit_impl(alg, Σ, μ, rank; 
+    return _fit_impl(algorithm, Σ, μ, rank; 
                     maxiter=maxiter, abstol=abstol, α=α, suppress_warnings=suppress_warnings)
 end
 
@@ -443,28 +458,23 @@ Convenience wrapper for `fit(HeteroPCAModel, X, rank=size(X, 1); kwargs...)`.
 - `rank::Int=size(X, 1)`: The target dimensionality *k* (number of components to extract)
 
 # Keyword arguments
-- `algorithm::Symbol=:standard`: Algorithm to use (:standard, :deflated, or :diagonal_deletion)
+- `algorithm::HeteroPCAAlgorithm=StandardHeteroPCA()`: Algorithm to use (StandardHeteroPCA(), DeflatedHeteroPCA(), or DiagonalDeletion())
 - `maxiter::Int=1_000`: Maximum number of iterations for the algorithm 
 - `abstol::Float64=1e-6`: Convergence tolerance for diagonal estimation
 - `demean::Bool=true`: Whether to center the data by subtracting column means; if the model is already demeaned, set `demean=false`
 - `impute_method::Symbol=:pairwise`: Method for handling missing values (:pairwise or :zero); `impute = :pairwise` compute the pairwise covariance matrix using available data only; `impute = :zero` fills the missing values with zeros after demeaning, and compute the covariance matrix adjusted for the sample missing rate. 
-- `alpha::Float64=1.0`: Diagonal update relaxation parameter; `alpha = 1` reproduces the original scheme;
+- `α::Float64=1.0`: Diagonal update relaxation parameter; `α = 1` reproduces the original scheme;
 - `suppress_warnings::Bool=false`: Whether to suppress convergence warnings
 
-# Deflated algorithm specific parameters
-- `t_block::Int=10`: Iterations per deflation block (deflated algorithm only)
-- `condition_number_threshold::Float64=4.0`: Well-conditioning threshold (deflated algorithm only)
 """
 function heteropca(X::AbstractMatrix{T}, rank=size(X, 1);
-    algorithm::Symbol=:standard,
+    algorithm::HeteroPCAAlgorithm=StandardHeteroPCA(),
     maxiter=1_000,
     abstol=1e-6,
     demean=true,
     impute_method=:pairwise,
     α=1.0,
-    suppress_warnings=false,
-    t_block::Int=10,
-    condition_number_threshold::Real=4.0) where T
+    suppress_warnings=false) where T
 
     return fit(HeteroPCAModel, X, rank;
         algorithm=algorithm,
@@ -473,9 +483,7 @@ function heteropca(X::AbstractMatrix{T}, rank=size(X, 1);
         demean=demean,
         impute_method=impute_method,
         α=α,
-        suppress_warnings=suppress_warnings,
-        t_block=t_block,
-        condition_number_threshold=condition_number_threshold)
+        suppress_warnings=suppress_warnings)
 end
 
 # ────────────────────────────────────────────────────────────────────────────────

@@ -136,3 +136,33 @@ end
     @test sub_pair ≤ 0.05
     @test fac_pair ≤ 0.05
 end
+
+@testset "DeflatedHeteroPCA – p = 0.5, small noise (avg over 40)" begin
+    n_large = 2000
+    R = 40
+    p = 0.5
+    sub_zero = 0.0
+    fac_zero = 0.0
+    sub_pair = 0.0
+    fac_pair = 0.0
+    for _ in 1:R
+        Y, Ustar, Z = simulate(d, Int(n_large / p), r; p=p, ω̄=0.02)
+
+        m0 = heteropca(Y, r; demean=true, impute_method=:zero, algorithm=DeflatedHeteroPCA())
+        sub_zero += subspace_error(projection(m0), Ustar)
+        fac_zero += factor_error(predict(m0, Y), Z)
+
+        mp = heteropca(Y, r; demean=true, impute_method=:pairwise, algorithm=DeflatedHeteroPCA())
+        sub_pair += subspace_error(projection(mp), Ustar)
+        fac_pair += factor_error(predict(mp, Y), Z)
+    end
+    sub_zero /= R
+    fac_zero /= R
+    sub_pair /= R
+    fac_pair /= R
+
+    @test sub_zero ≤ 0.05
+    @test fac_zero ≤ 0.05
+    @test sub_pair ≤ 0.05
+    @test fac_pair ≤ 0.05
+end

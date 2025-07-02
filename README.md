@@ -8,7 +8,7 @@
 
 ## Overview
 
-HeteroPCA.jl implements the HeteroPCA algorithm proposed by Zhang, Cai, and Wu (2021). The API is similar to [MultivariateStats.jl](https://github.com/JuliaStats/MultivariateStats.jl) with twists to handle missing values.  
+HeteroPCA.jl implements the HeteroPCA algorithm proposed by Zhang, Cai, and Wu (2021), along with the deflated HeteroPCA algorithm by Zhou and Chen (2025) for improved convergence. The API is similar to [MultivariateStats.jl](https://github.com/JuliaStats/MultivariateStats.jl) with extensions to handle missing values and multiple algorithm variants.  
 
 ## Installation
 
@@ -56,19 +56,59 @@ X_reconstructed = reconstruct(model, Y)
 cor(vec(X_reconstructed), vec(U_true * F_true)) # 0.96
 ```
 
+## Algorithm Options
+
+HeteroPCA.jl supports three different algorithms:
+
+- `StandardHeteroPCA()` (default): The original iterative HeteroPCA algorithm from Zhang, Cai & Wu (2021)
+- `DeflatedHeteroPCA()`: Deflated HeteroPCA with adaptive block sizing for improved convergence
+- `DiagonalDeletion()`: Simple diagonal-deletion PCA (baseline comparison)
+
+```julia
+# Standard algorithm (default)
+model1 = heteropca(X, rank)
+
+# Deflated algorithm with custom parameters
+model2 = heteropca(X, rank; algorithm=DeflatedHeteroPCA(t_block=5, condition_number_threshold=10.0))
+
+# Diagonal deletion (a wrapper with maxiter = 1 for standard algorithm)
+model3 = heteropca(X, rank; algorithm=DiagonalDeletion())
+```
+
 ## Keyword Arguments for `heteropca`
 
 The `heteropca` function supports the following keyword arguments:
 
 ```julia
-heteropca(X, rank = size(X, 1); maxiter=1_000, abstol=1e-6, demean=true, impute_method=:pairwise, α=1.0)
+heteropca(X, rank = size(X, 1); 
+    algorithm=StandardHeteroPCA(), 
+    maxiter=1_000, 
+    abstol=1e-6, 
+    demean=true, 
+    impute_method=:pairwise, 
+    α=1.0,
+    suppress_warnings=false)
 ```
 
+### Parameters
+- `algorithm::HeteroPCAAlgorithm=StandardHeteroPCA()`: Algorithm to use (StandardHeteroPCA(), DeflatedHeteroPCA(), or DiagonalDeletion())
 - `maxiter::Int=1_000`: Maximum number of iterations for the algorithm
 - `abstol::Float64=1e-6`: Convergence tolerance for diagonal estimation
 - `demean::Bool=true`: Whether to center the data by subtracting column means; if the model is already demeaned, set `demean=false`
-- `impute_method::Symbol=:pairwise`: Method for handling missing values (:pairwise or :zero)
+- `impute_method::Symbol=:pairwise`: Method for handling missing values (`:pairwise` or `:zero`)
 - `α::Float64=1.0`: Diagonal update relaxation parameter; `α = 1` reproduces the original scheme
+- `suppress_warnings::Bool=false`: Whether to suppress convergence warnings
+
+### Algorithm-Specific Parameters
+
+For `DeflatedHeteroPCA`, you can specify:
+- `t_block::Int=10`: Number of iterations per deflation block
+- `condition_number_threshold::Float64=4.0`: Threshold for determining well-conditioned blocks
+
+```julia
+# Example with custom deflated parameters
+model = heteropca(X, rank; algorithm=DeflatedHeteroPCA(t_block=15, condition_number_threshold=6.0))
+```
 
 ## Working with Missing Data
 

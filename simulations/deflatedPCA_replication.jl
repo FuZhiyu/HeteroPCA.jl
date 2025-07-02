@@ -57,7 +57,7 @@ function run_experiment(n1::Int, n2::Int, r::Int, kappa::Real, sigma::Real, seed
     results = NamedTuple[]
 
     # Method 1: Deflated HeteroPCA
-    model_deflated = heteropca(Y, r; algorithm=:deflated, t_block=5)
+    model_deflated = heteropca(Y, r; algorithm=DeflatedHeteroPCA(t_block=5))
     U_deflated = projection(model_deflated)
     errors = compute_errors(U_deflated, U)
     push!(results, (method="Deflated HeteroPCA", spectral_error=errors.spectral_error, two_to_infty_error=errors.two_to_infty_error))
@@ -69,13 +69,13 @@ function run_experiment(n1::Int, n2::Int, r::Int, kappa::Real, sigma::Real, seed
     push!(results, (method="SVD", spectral_error=errors.spectral_error, two_to_infty_error=errors.two_to_infty_error))
 
     # Method 3: Diagonal Deletion
-    model_diag = heteropca(Y, r; algorithm=:diagonal_deletion)
+    model_diag = heteropca(Y, r; algorithm=DiagonalDeletion())
     U_diag = projection(model_diag)
     errors = compute_errors(U_diag, U)
     push!(results, (method="Diagonal Deletion", spectral_error=errors.spectral_error, two_to_infty_error=errors.two_to_infty_error))
 
     # Method 4: Standard HeteroPCA
-    model_hetero = heteropca(Y, r; algorithm=:standard, maxiter=50)
+    model_hetero = heteropca(Y, r; algorithm=StandardHeteroPCA(), maxiter=50)
     U_hetero = projection(model_hetero)
     errors = compute_errors(U_hetero, U)
     push!(results, (method="HeteroPCA", spectral_error=errors.spectral_error, two_to_infty_error=errors.two_to_infty_error))
