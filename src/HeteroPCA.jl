@@ -176,6 +176,82 @@ comparison method.
 struct DiagonalDeletion <: HeteroPCAAlgorithm end
 
 # ────────────────────────────────────────────────────────────────────────────────
+# Shared utility functions
+# ────────────────────────────────────────────────────────────────────────────────
+
+"""
+    heteropca_step!(M, U, S, rank, α, check_convergence, abstol)
+
+Unified HeteroPCA step: SVD, convergence check, and diagonal update in one function.
+Returns (converged, error) where converged indicates if tolerance was met.
+"""
+function heteropca_step!(M::AbstractMatrix{T}, U::AbstractMatrix{T}, S::AbstractVector{T},
+    rank::Int, α::Real, check_convergence::Bool, abstol::Real) where T<:Real
+
+    # SVD step
+    F = svd(M; full=false)
+    U_k = @view F.U[:, 1:rank]
+    S_k = @view F.S[1:rank]
+
+    # Store results in pre-allocated arrays
+    copyto!(@view(U[:, 1:rank]), U_k)
+    copyto!(@view(S[1:rank]), S_k)
+
+    # Combined convergence check and diagonal update in single pass
+    converged = true
+    err = zero(T)
+    d = size(M, 1)
+
+    @inbounds for i in 1:d
+        # Compute new diagonal value: sum_j (U_k[i,j] * S_k[j] * U_k[i,j])
+        new_diag = zero(T)
+        for j in 1:rank
+            new_diag += U_k[i, j] * S_k[j] * U_k[i, j]
+        end
+
+        # Check convergence if requested
+        if check_convergence
+            diff = abs(new_diag - M[i, i])
+            err = max(err, diff)
+            converged = converged && (diff < abstol)
+        end
+
+        # Update diagonal with relaxation
+        M[i, i] = α * new_diag + (1 - α) * M[i, i]
+    end
+
+    return converged, err
+end
+
+"""
+    heteropca_finalize(Σ, U, S, μ, rank, converged, iter)
+
+Unified finalization step for all HeteroPCA algorithms.
+Computes noise variances and creates the final HeteroPCAModel.
+"""
+function heteropca_finalize(Σ::AbstractMatrix{T}, U::AbstractMatrix{T}, S::AbstractVector{T},
+    μ::AbstractVector{T}, rank::Int, converged::Bool, iter::Int) where T<:Real
+    d = size(Σ, 1)
+
+    # Compute reconstructed diagonal for noise variance estimation
+    M̃_diag = Vector{T}(undef, d)
+    @inbounds for i in 1:d
+        M̃_diag[i] = zero(T)
+        for j in 1:rank
+            M̃_diag[i] += U[i, j] * S[j] * U[i, j]
+        end
+    end
+
+    proj = U
+    prinvars = S
+    tprinvar = sum(S)
+    noisevars = diag(Σ) .- M̃_diag
+    tvar = tprinvar + sum(noisevars)
+
+    return HeteroPCAModel(μ, proj, prinvars, tprinvar, tvar, noisevars, converged, iter)
+end
+
+# ────────────────────────────────────────────────────────────────────────────────
 # Core algorithm (Cai, Ma & Wu 2019; Xue & Zou 2023)
 # ────────────────────────────────────────────────────────────────────────────────
 
@@ -212,39 +288,24 @@ function _fit_impl(alg::StandardHeteroPCA, Σ::AbstractMatrix{T}, μ::AbstractVe
     suppress_warnings::Bool=false) where T<:Real
     
     d = size(Σ, 1)
-    M = Σ - Diagonal(diag(Σ))        # off‑diag part
-    U = Matrix{T}(undef, d, rank)    # preallocation
-    S = Vector{T}(undef, rank)
-    M̃ = similar(M)                   # pre-define M̃ outside the loop
+
+    # Pre-allocate work arrays
+    M = Σ - Diagonal(diag(Σ))        # off‑diag part (allocates once)
+    U = Matrix{T}(undef, d, rank)    # projection matrix storage
+    S = Vector{T}(undef, rank)       # singular values storage
+
     iter = 0
     converged = false
     
-    while iter < maxiter
-        F = svd(M; full=false)           # Truncated SVD (rank ≥ k)
-        U = F.U[:, 1:rank]
-        S = F.S[1:rank]
-        M̃ = U * Diagonal(S) * U'        # best rank‑k approx (sym)
-        err = maximum(abs.((diag(M̃) .- diag(M))))
-        if err < abstol
-            converged = true
-            break
-        end
-
-        # Robbins–Monro diagonal update
-        @inbounds for i in 1:d
-            M[i, i] = α * M̃[i, i] + (1 - α) * M[i, i]
-        end
+    while iter < maxiter && !converged
+        # Unified step: SVD, convergence check, and diagonal update
+        converged, err = heteropca_step!(M, U, S, rank, α, true, abstol)
         iter += 1
     end
+
     iter == maxiter && !suppress_warnings && @warn "HeteroPCAModel: not converged after $maxiter iterations"
 
-    proj = U
-    prinvars = S
-    tprinvar = sum(S) 
-    noisevars = diag(Σ) .- diag(M̃)
-    tvar = tprinvar + sum(noisevars)
-
-    return HeteroPCAModel(μ, proj, prinvars, tprinvar, tvar, noisevars, converged, iter)
+    return heteropca_finalize(Σ, U, S, μ, rank, converged, iter)
 end
 
 """
@@ -258,34 +319,31 @@ function _fit_impl(alg::DeflatedHeteroPCA, Σ::AbstractMatrix{T}, μ::AbstractVe
     α::Real=1.0,
     suppress_warnings::Bool=false) where T<:Real
     
-    # Work directly with the covariance matrix Σ
-    U = deflated_heteropca_core(Σ, rank; 
-                              t_block=alg.t_block, 
-                              condition_number_threshold=alg.condition_number_threshold)
+    d = size(Σ, 1)
+    M = Σ - Diagonal(diag(Σ))        # off‑diag part, consistent with standard algorithm
+
+    # Run deflated algorithm on M
+    U, M_final = deflated_heteropca_core(M, rank;
+        t_block=alg.t_block,
+        condition_number_threshold=alg.condition_number_threshold,
+        α=α)
     
-    # Compute the reconstructed low-rank matrix
-    M̃ = U * U'
-    
-    # Extract singular values from the reconstructed matrix  
-    F = svd(M̃; full=false)
-    S = F.S[1:rank]
-    
-    proj = U
-    prinvars = S
-    tprinvar = sum(S)
-    noisevars = diag(Σ) .- diag(M̃)
-    tvar = tprinvar + sum(noisevars)
+    # Compute principal variances from the converged M matrix
+    # Project M onto the estimated subspace to get the variance explained
+    M_projected = U' * M_final * U
+    S = svdvals(Symmetric(M_projected))
+
     converged = true  # Deflated algorithm always "converges"
     iter = alg.t_block  # Report the block iterations used
 
-    return HeteroPCAModel(μ, proj, prinvars, tprinvar, tvar, noisevars, converged, iter)
+    return heteropca_finalize(Σ, U, S, μ, rank, converged, iter)
 end
 
 """
     _fit_impl(alg::DiagonalDeletion, Σ, μ, rank; maxiter, abstol, α, suppress_warnings)
 
-Implementation for diagonal-deletion PCA algorithm. This is essentially one-step SVD 
-on the off-diagonal covariance matrix without iteration.
+Implementation for diagonal-deletion PCA algorithm. This is just one iteration 
+of the standard algorithm without diagonal updates (α=0).
 """
 function _fit_impl(alg::DiagonalDeletion, Σ::AbstractMatrix{T}, μ::AbstractVector{T}, rank::Int;
     maxiter::Int=1_000,
@@ -294,25 +352,20 @@ function _fit_impl(alg::DiagonalDeletion, Σ::AbstractMatrix{T}, μ::AbstractVec
     suppress_warnings::Bool=false) where T<:Real
     
     d = size(Σ, 1)
+
+    # Pre-allocate work arrays  
     M = Σ - Diagonal(diag(Σ))        # off‑diag part
+    U = Matrix{T}(undef, d, rank)    # projection matrix storage
+    S = Vector{T}(undef, rank)       # singular values storage
     
-    # Single SVD step (no iteration)
-    F = svd(M; full=false)
-    U = F.U[:, 1:rank]
-    S = F.S[1:rank]
-    M̃ = U * Diagonal(S) * U'        # best rank‑k approx (sym)
-    
-    proj = U
-    prinvars = S
-    tprinvar = sum(S) 
-    noisevars = diag(Σ) .- diag(M̃)
-    tvar = tprinvar + sum(noisevars)
+    # Single step with α=0 (no diagonal update, just SVD of off-diagonal matrix)
+    converged, err = heteropca_step!(M, U, S, rank, 0.0, false, 0.0)
     
     # Diagonal deletion always "converges" since it's a single operation
     converged = true
     iter = 1
 
-    return HeteroPCAModel(μ, proj, prinvars, tprinvar, tvar, noisevars, converged, iter)
+    return heteropca_finalize(Σ, U, S, μ, rank, converged, iter)
 end
 
 function fit(::Type{HeteroPCAModel}, X::AbstractMatrix{T}, rank=size(X, 1);
@@ -490,123 +543,85 @@ end
 # Deflated HeteroPCA algorithm (helper functions)
 # ────────────────────────────────────────────────────────────────────────────────
 
-"""
-    Pdiag(A)
-
-Keep only diagonal of square matrix `A`, zero elsewhere.
-"""
-function Pdiag(A::AbstractMatrix{T}) where T<:Real
-    return Diagonal(diag(A))
-end
 
 """
-    Poff(A)
+    heteropca_inner!(M, U, S, r, t_max, α)
 
-Zero the diagonal of `A`, keep the rest.
+Inner routine for deflated HeteroPCA using the unified step function.
 """
-function Poff(A::AbstractMatrix{T}) where T<:Real
-    return A - Pdiag(A)
-end
+function heteropca_inner!(M::AbstractMatrix{T}, U::AbstractMatrix{T}, S::AbstractVector{T},
+    r::Int, t_max::Int, α::Real=1.0) where T<:Real
 
-"""
-    eigsr(A, r)
-
-Return the column-orthonormal matrix (n×r) of top-r eigenvectors of symmetric `A`.
-"""
-function eigsr(A::AbstractMatrix{T}, r::Int) where T<:Real
-    F = eigen(Symmetric(A))
-    idx = sortperm(F.values, rev=true)
-    return F.vectors[:, idx[1:r]]
-end
-
-"""
-    heteropca_inner(G_in, r, t_max)
-
-Inner routine for deflated HeteroPCA: iteratively impute better diagonal 
-while keeping off-diagonal fixed.
-"""
-function heteropca_inner(G_in::AbstractMatrix{T}, r::Int, t_max::Int) where T<:Real
-    G = copy(G_in)
     for _ in 1:t_max
-        U = eigsr(G, r)
-        G = Poff(G_in) + Pdiag(U * U')
+        # No convergence check for deflated algorithm
+        heteropca_step!(M, U, S, r, α, false, 0.0)
     end
-    return eigsr(G, r)
+
+    return M
 end
 
 """
-    deflated_heteropca_core(Σ, r; t_block=10, condition_number_threshold=4.0, gap_threshold_factor=1.0)
+    find_next_block_size(s, r_start, r_end, condition_number_threshold)
 
-Core deflated HeteroPCA algorithm that implements the deflation strategy following the R reference implementation.
-Takes the covariance matrix Σ as input and implements the two-phase deflation process.
+Find the next deflation block size based on condition number and spectral gap criteria.
 """
-function deflated_heteropca_core(Σ::AbstractMatrix{T}, r::Int; 
-    t_block::Int=10, 
-    condition_number_threshold::Real=4.0) where T<:Real
+function find_next_block_size(s::AbstractVector{T}, r_start::Int, r_end::Int, 
+                             condition_number_threshold::Real) where T<:Real
+    r_select = r_start
     
-    d = size(Σ, 1)
-    G = Poff(Σ)  # Start with off-diagonal covariance matrix
-    
-    # Phase 1: Initial block selection (following R implementation lines 2-20)
-    r_select = 1
-    
-    # Find initial block size based on condition number and spectral gap
-    s = svd(G, full=false).S
-    for i in 1:r
-        # Condition number check: σ₁ / σᵢ > condition_number_threshold
-        if length(s) >= i && s[1] / s[i] > condition_number_threshold
+    for i in r_start:min(r_end, length(s))
+        # Condition number check
+        reference_singular_value = (r_start == 1) ? s[1] : s[r_start]
+        if reference_singular_value / s[i] > condition_number_threshold
             break
         # Spectral gap check: σᵢ > (r/(r-1)) * σᵢ₊₁ OR we've reached the target rank
-        elseif i == r || (length(s) >= i+1 && s[i] > (r/(r-1)) * s[i+1])
+        elseif i == r_end || (i < length(s) && s[i] > (r_end/(r_end-1)) * s[i+1])
             r_select = i
         end
     end
     
-    # Run initial block iterations if r_select >= 1
+    return r_select
+end
+
+"""
+    deflated_heteropca_core(M_in, r; t_block=10, condition_number_threshold=4.0, α=1.0)
+
+Core deflated HeteroPCA algorithm that implements the deflation strategy.
+Takes the off-diagonal matrix M as input and returns both the subspace U and converged M.
+"""
+function deflated_heteropca_core(M_in::AbstractMatrix{T}, r::Int;
+    t_block::Int=10, 
+    condition_number_threshold::Real=4.0,
+    α::Real=1.0) where T<:Real
+
+    d = size(M_in, 1)
+    G = copy(M_in)  # Work with a copy to preserve input
+    
+    # Pre-allocate arrays for efficiency
     U_hat = Matrix{T}(undef, d, r)
-    if r_select >= 1
-        U1_hat = eigsr(G, r_select)
-        
-        # Iterative refinement for initial block
-        for _ in 1:t_block
-            # Update diagonal: G = G - diag(G) + diag(U₁ᵀU₁G)
-            G = Poff(G) + Pdiag(U1_hat * U1_hat' * G)
-            U1_hat = eigsr(G, r_select)
-        end
-        
-        # Final update for this block
-        G = Poff(G) + Pdiag(U1_hat * U1_hat' * G)
-        U_hat[:, 1:r_select] = U1_hat
-    end
+    U_temp = similar(U_hat)  # Temporary storage for eigenvectors
+    S_temp = Vector{T}(undef, r)
     
-    # Phase 2: Continue deflation for remaining components (following R implementation lines 21-35)
-    while r - r_select >= 1
-        r_temp = r_select
-        
+    r_select = 0
+    
+    # Deflation loop: process components in adaptive blocks
+    while r_select < r
         # Find next block size
-        s = svd(G, full=false).S
-        for i in (r_temp+1):r
-            # Condition number check: σᵣ_temp+1 / σᵢ > condition_number_threshold  
-            if length(s) >= i && length(s) >= r_temp+1 && s[r_temp+1] / s[i] > condition_number_threshold
-                break
-            # Spectral gap check: σᵢ > (r/(r-1)) * σᵢ₊₁ OR we've reached the target rank
-            elseif i == r || (length(s) >= i+1 && s[i] > (r/(r-1)) * s[i+1])
-                r_select = i
-            end
-        end
+        s = svdvals(G)
+        r_new = find_next_block_size(s, r_select + 1, r, condition_number_threshold)
         
-        # Run iterations for current block
-        for _ in 1:t_block
-            U_current = eigsr(G, r_select)
-            # Update diagonal: G = G - diag(G) + diag(UᵀUG)
-            G = Poff(G) + Pdiag(U_current * U_current' * G)
+        if r_new > r_select  # Only proceed if we found new components
+            # Run iterations for current block
+            G = heteropca_inner!(G, U_temp, S_temp, r_new, t_block, α)
+            U_hat[:, 1:r_new] = U_temp[:, 1:r_new]
+            r_select = r_new
+        else
+            # No progress possible, break to avoid infinite loop
+            break
         end
-        
-        # Store the current block result
-        U_hat[:, 1:r_select] = eigsr(G, r_select)
     end
     
-    return U_hat
+    return U_hat, G
 end
 
 end # module

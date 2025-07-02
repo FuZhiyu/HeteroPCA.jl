@@ -26,8 +26,8 @@ miss_mask = rand(d, n) .< 0.1
 X_with_missing[miss_mask] .= missing
 
 # Fit HeteroPCA model
-model = fit(HeteroPCAModel, X, k)
-model_with_missing = fit(HeteroPCAModel, X_with_missing, k)
+model = fit(HeteroPCAModel, X, k, algorithm=StandardHeteroPCA())
+model_with_missing = fit(HeteroPCAModel, X_with_missing, k, algorithm=StandardHeteroPCA())
 
 # Test predict function
 @testset "predict" begin
@@ -55,7 +55,7 @@ model_with_missing = fit(HeteroPCAModel, X_with_missing, k)
 
     # Test that predict handles demeaning correctly
     X_not_centered = X .+ randn(d)
-    model_not_centered = fit(HeteroPCAModel, X_not_centered, k)
+    model_not_centered = fit(HeteroPCAModel, X_not_centered, k, algorithm=StandardHeteroPCA())
     Y_not_centered = predict(model_not_centered, X_not_centered)
     @test size(Y_not_centered) == (k, n)
 
@@ -145,24 +145,24 @@ end
 
 @testset "Advanced functionality" begin
     # Test that increasing rank preserves more variance
-    model_rank1 = fit(HeteroPCAModel, X, 1)
-    model_rank2 = fit(HeteroPCAModel, X, 2)
+    model_rank1 = fit(HeteroPCAModel, X, 1, algorithm=StandardHeteroPCA())
+    model_rank2 = fit(HeteroPCAModel, X, 2, algorithm=StandardHeteroPCA())
     @test r2(model_rank1) <= r2(model_rank2)
 
     # Test that model converges with different settings
-    model_tight = fit(HeteroPCAModel, X, k, abstol=1e-8, maxiter=2000)
+    model_tight = fit(HeteroPCAModel, X, k, abstol=1e-8, maxiter=2000, algorithm=StandardHeteroPCA())
     @test model_tight.converged
 
     # Test the heteropca convenience function
-    model_hetero = heteropca(X, k)
+    model_hetero = heteropca(X, k, algorithm=StandardHeteroPCA())
     @test size(model_hetero) == (d, k)
     @test length(principalvars(model_hetero)) == k
 
     # Test with different imputation methods
-    model_zero = fit(HeteroPCAModel, X_with_missing, k, impute_method=:zero)
+    model_zero = fit(HeteroPCAModel, X_with_missing, k, impute_method=:zero, algorithm=StandardHeteroPCA())
     @test size(model_zero) == (d, k)
 
     # Test with no demeaning
-    model_no_demean = fit(HeteroPCAModel, X, k, demean=false)
+    model_no_demean = fit(HeteroPCAModel, X, k, demean=false, algorithm=StandardHeteroPCA())
     @test all(model_no_demean.mean .== 0)
 end

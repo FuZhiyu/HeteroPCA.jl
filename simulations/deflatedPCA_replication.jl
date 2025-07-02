@@ -193,7 +193,7 @@ println("=== COMPLETE FIGURE 4 REPLICATION ===")
 
 # Simulation parameters (reduced for speed)
 r = 3
-seed_range = 2023:2073
+seed_range = 2023:2033
 
 # Create results directory
 mkpath("results")
