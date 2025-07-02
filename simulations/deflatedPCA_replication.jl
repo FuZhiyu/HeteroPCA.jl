@@ -75,7 +75,7 @@ function run_experiment(n1::Int, n2::Int, r::Int, kappa::Real, sigma::Real, seed
     push!(results, (method="Diagonal Deletion", spectral_error=errors.spectral_error, two_to_infty_error=errors.two_to_infty_error))
 
     # Method 4: Standard HeteroPCA
-    model_hetero = heteropca(Y, r; algorithm=StandardHeteroPCA(), maxiter=50)
+    model_hetero = heteropca(Y, r; algorithm=StandardHeteroPCA(), maxiter=200)
     U_hetero = projection(model_hetero)
     errors = compute_errors(U_hetero, U)
     push!(results, (method="HeteroPCA", spectral_error=errors.spectral_error, two_to_infty_error=errors.two_to_infty_error))
@@ -193,7 +193,7 @@ println("=== COMPLETE FIGURE 4 REPLICATION ===")
 
 # Simulation parameters (reduced for speed)
 r = 3
-seed_range = 2023:2025  # 3 replications instead of 50
+seed_range = 2023:2073
 
 # Create results directory
 mkpath("results")
@@ -231,4 +231,4 @@ complete_figure = plot(p1a, p1b, p1c, p1d, p1e, p1f,
     plot_title="Figure 4: Estimation errors under the factor model")
 
 # Save complete figure
-savefig(complete_figure, "results/figure4_complete_replication.png")
+savefig(complete_figure, "simulations/ZhouChen2025_figure4_complete_replication.png")

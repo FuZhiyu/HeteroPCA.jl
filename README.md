@@ -158,6 +158,9 @@ Below is a replication of Figure 2 from Yan, Chen & Fan (2024), showing how Hete
 
 To reproduce this figure, run the script `simulations/replicateYanChenFan2024.jl`.
 
+See the folder `simulations` for more replications.
+
 ## References
 
 - Zhang, A. R., Cai, T. T., & Wu, Y. (2021). Heteroskedastic PCA: Algorithm, Optimality, and Applications (No. arXiv:1810.08316). arXiv. https://doi.org/10.48550/arXiv.1810.08316
+- Yuchen Zhou. Yuxin Chen. "Deflated HeteroPCA: Overcoming the curse of ill-conditioning in heteroskedastic PCA." Ann. Statist. 53 (1) 91 - 116, February 2025. https://doi.org/10.1214/24-AOS2456
