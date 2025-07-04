@@ -12,19 +12,14 @@
 ###############################################################################
 using LinearAlgebra, Random, Statistics, StatsBase
 using HeteroPCA
+using HeteroPCA: sinθ_distance, ortho_cols
 using ProgressMeter
 using Plots
 using Distributions
 
 # ───────────────────────── reusable helpers ──────────────────────────
 
-"""
-    ortho_cols(A)
-
-Return an orthonormal basis that spans the same column‑space as `A`
-(thin‑QR, returned as a plain `Matrix`).
-"""
-ortho_cols(A) = Matrix(qr(A).Q)
+# ortho_cols imported from HeteroPCA
 
 """
     generate_dataset(p, n, r; α = 0.0, θ = 0.0, rng = Random.GLOBAL_RNG)
@@ -137,19 +132,7 @@ function estimate_subspaces(Y, r; abstol=1e-4, kwargs...)
     return Û
 end
 
-"""
-    sinθ_distance(U, Uhat; norm = :spectral)
-
-sin‑Θ loss between two sub‑spaces.  
-`norm = :spectral`  → operator 2‑norm (default in paper);  
-`norm = :fro`       → Frobenius norm.
-"""
-function sinθ_distance(U, Uh; norm::Symbol=:spectral)
-    Q1 = ortho_cols(U)                  # ensure orthonormal
-    Q2 = ortho_cols(Uh)
-    Δ = Q1 * Q1' - Q2 * Q2'
-    return norm === :spectral ? opnorm(Δ) : LinearAlgebra.norm(Δ, fro)
-end
+# sinθ_distance imported from HeteroPCA
 
 """
     run_simulation(ns, nrep, r_vals, p; α = 0.0, θ = 0.0, rng)
