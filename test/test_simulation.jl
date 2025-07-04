@@ -54,11 +54,11 @@ r = 3
     Y, Ustar, Z = simulate(d, n, r; p=1.0, ω̄=0.0)
     model = heteropca(Y, r; demean=false, abstol=1e-10)
 
-    @test frobenius_error(projection(model), Ustar) ≤ 1e-8
+    @test matrix_distance(projection(model), Ustar, align=true, relative=true) ≤ 1e-8
 
     # test factor recovery
     F̂ = predict(model, Y)
-    @test frobenius_error(F̂, Z) ≤ 1e-8
+    @test matrix_distance(F̂', Z'; norm=:fro, align=true, relative=true) ≤ 1e-8
 
     # round‑trip a few columns through predict / reconstruct
     for j in 1:5
@@ -80,8 +80,8 @@ end
     for _ in 1:R
         Y, Ustar, Z = simulate(d, n_large, r; p=1.0, ω̄=0.02)
         m = heteropca(Y, r; demean=false, impute_method=:zero)
-        sub_err += frobenius_error(projection(m), Ustar)
-        fac_err += frobenius_error(predict(m, Y), Z)
+        sub_err += matrix_distance(projection(m), Ustar, align=true, relative=true)
+        fac_err += matrix_distance(predict(m, Y)', Z'; norm=:fro, align=true, relative=true)
     end
     sub_err /= R
     fac_err /= R
@@ -104,12 +104,12 @@ end
         Y, Ustar, Z = simulate(d, Int(n_large / p), r; p=p, ω̄=0.02)
 
         m0 = heteropca(Y, r; demean=true, impute_method=:zero)
-        sub_zero += frobenius_error(projection(m0), Ustar)
-        fac_zero += frobenius_error(predict(m0, Y), Z)
+        sub_zero += matrix_distance(projection(m0), Ustar, align=true, relative=true)
+        fac_zero += matrix_distance(predict(m0, Y)', Z'; norm=:fro, align=true, relative=true)
 
         mp = heteropca(Y, r; demean=true, impute_method=:pairwise)
-        sub_pair += frobenius_error(projection(mp), Ustar)
-        fac_pair += frobenius_error(predict(mp, Y), Z)
+        sub_pair += matrix_distance(projection(mp), Ustar, align=true, relative=true)
+        fac_pair += matrix_distance(predict(mp, Y)', Z'; norm=:fro, align=true, relative=true)
     end
     sub_zero /= R
     fac_zero /= R
@@ -134,12 +134,12 @@ end
         Y, Ustar, Z = simulate(d, Int(n_large / p), r; p=p, ω̄=0.02)
 
         m0 = heteropca(Y, r; demean=true, impute_method=:zero, algorithm=DeflatedHeteroPCA())
-        sub_zero += frobenius_error(projection(m0), Ustar)
-        fac_zero += frobenius_error(predict(m0, Y), Z)
+        sub_zero += matrix_distance(projection(m0), Ustar, align=true, relative=true)
+        fac_zero += matrix_distance(predict(m0, Y)', Z'; norm=:fro, align=true, relative=true)
 
         mp = heteropca(Y, r; demean=true, impute_method=:pairwise, algorithm=DeflatedHeteroPCA())
-        sub_pair += frobenius_error(projection(mp), Ustar)
-        fac_pair += frobenius_error(predict(mp, Y), Z)
+        sub_pair += matrix_distance(projection(mp), Ustar, align=true, relative=true)
+        fac_pair += matrix_distance(predict(mp, Y)', Z'; norm=:fro, align=true, relative=true)
     end
     sub_zero /= R
     fac_zero /= R

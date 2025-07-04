@@ -16,6 +16,6 @@ export HeteroPCAModel, fit, predict, reconstruct,
     projection, principalvars, r2, loadings, noisevars, var, eigvals, eigvecs,
     tprincipalvar, tresidualvar, heteropca, principalratio,
     StandardHeteroPCA, DeflatedHeteroPCA, DiagonalDeletion,
-    align_A_to_B, frobenius_error
+    procrustes_align, matrix_distance, sinθ_distance
 
 end # module

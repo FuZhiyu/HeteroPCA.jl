@@ -8,6 +8,7 @@
 ##############################################################################
 
 using Random, LinearAlgebra, Statistics, Distributions
+using HeteroPCA: procrustes_align, matrix_distance, row_norm
 
 # ---------- utilities -------------------------------------------------------
 
@@ -17,15 +18,11 @@ function rand_orthonormal(d::Int, r::Int; rng=Random.GLOBAL_RNG)
     return Matrix(Q[:, 1:r])  # make it dense
 end
 
-"""Orthogonal 'sign' matrix that best aligns A with B (Procrustes)."""
-function sgn_alignment(A::AbstractMatrix, B::AbstractMatrix)
-    F = A' * B
-    U, _, V = svd(F)
-    return U * V'          # the R in UR that minimises ‖UR – B‖_F
-end
+# Use HeteroPCA.procrustes_align instead of local sgn_alignment
+sgn_alignment(A, B) = procrustes_align(A, B)[2]  # Return just the rotation matrix R
 
-"""Rowwise ℓ₂‑∞ norm: maxᵢ ‖rowᵢ‖₂."""
-row_2inf_norm(M) = maximum(row -> norm(row), eachrow(M))
+# Use HeteroPCA.row_norm instead of local row_2inf_norm
+row_2inf_norm(M) = row_norm(M; p=2, q=Inf)
 
 # ---------- data generation --------------------------------------------------
 
@@ -69,27 +66,21 @@ Return a NamedTuple with the three relative subspace errors used in Yan et al. (
 • fro – Frobenius ‖·‖_F / ‖U⋆‖_{2,∞}  
 • max – row‑ℓ₂‑∞ ‖·‖_{2,∞} / ‖U⋆‖_{2,∞}
 """
-function subspace_errors(Û, Ustar)
-    R = sgn_alignment(Û, Ustar)
-    Δ = Û * R .- Ustar
-    denom = row_2inf_norm(Ustar)
-    return (op=opnorm(Δ),
-        fro=norm(Δ) / norm(Ustar),
-        max=row_2inf_norm(Δ) / denom)
+function subspace_errors(Û, Ustar)
+    return (op=matrix_distance(Û, Ustar; norm=:spectral, align=true, relative=false),
+            fro=matrix_distance(Û, Ustar; norm=:fro, align=true, relative=true),
+            max=matrix_distance(Û, Ustar; norm=:max, align=true, relative=true))
 end
-
 """
     covariance_errors(Ŝ, Σstar)
 
 Return a NamedTuple of the three relative covariance errors (spectral, Frobenius, entry‑wise ∞‑norm).
 """
-function covariance_errors(Ŝ, Σstar)
-    Δ = Ŝ - Σstar
-    return (op=opnorm(Δ) / opnorm(Σstar),
-        fro=norm(Δ) / norm(Σstar),
-        inf=maximum(abs, Δ) / maximum(abs, Σstar))
+function covariance_errors(Ŝ, Σstar)
+    return (op=matrix_distance(Ŝ, Σstar; norm=:spectral, align=false, relative=true),
+            fro=matrix_distance(Ŝ, Σstar; norm=:fro, align=false, relative=true),
+            inf=matrix_distance(Ŝ, Σstar; norm=:inf, align=false, relative=true))
 end
-
 # ---------- example ----------------------------------------------------------
 ##############################################################################
 #  Replicate Fig. 2 from Yan, Chen & Fan (2024)
